@@ -2,14 +2,53 @@
   "name": "react-native-aeropush",
   "version": "0.1.0",
   "description": "Zero-dependency Over-The-Air update SDK for React Native. New Architecture (Turbo Module) native, server-driven bundle delivery with crash-guard auto-rollback and native fingerprint compatibility checks.",
+  "keywords": [
+    "react-native",
+    "ios",
+    "android",
+    "ota",
+    "over-the-air",
+    "hot-update",
+    "codepush",
+    "turbo-module",
+    "new-architecture",
+    "bundle-update"
+  ],
+  "homepage": "https://github.com/Ayush-khade/react-native-aeropush#readme",
+  "bugs": {
+    "url": "https://github.com/Ayush-khade/react-native-aeropush/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ayush-khade/react-native-aeropush.git"
+  },
+  "license": "MIT",
+  "author": "AeroPush",
+  "type": "commonjs",
   "main": "lib/commonjs/index.js",
-  "module": "lib/module/index.js",
-  "types": "lib/typescript/src/index.d.ts",
-  "react-native": "src/index.tsx",
-  "source": "src/index.tsx",
+  "types": "lib/typescript/commonjs/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./lib/typescript/module/index.d.ts",
+        "default": "./lib/module/index.js"
+      },
+      "require": {
+        "types": "./lib/typescript/commonjs/index.d.ts",
+        "default": "./lib/commonjs/index.js"
+      }
+    }
+  },
+  "bin": {
+    "aeropush": "cli/aeropush.js"
+  },
+  "directories": {
+    "example": "example"
+  },
   "files": [
     "src",
     "lib",
+    "cli",
     "android",
     "ios",
     "cpp",
@@ -30,36 +69,6 @@
     "clean": "del-cli android/build ios/build lib",
     "prepare": "bob build"
   },
-  "keywords": [
-    "react-native",
-    "ios",
-    "android",
-    "ota",
-    "over-the-air",
-    "hot-update",
-    "codepush",
-    "turbo-module",
-    "new-architecture",
-    "bundle-update"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/aeropush/react-native-aeropush.git"
-  },
-  "author": "AeroPush",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/aeropush/react-native-aeropush/issues"
-  },
-  "homepage": "https://github.com/aeropush/react-native-aeropush#readme",
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
-  "peerDependencies": {
-    "react": "*",
-    "react-native": ">=0.76.0"
-  },
   "devDependencies": {
     "@types/react": "^19.0.0",
     "del-cli": "^6.0.0",
@@ -68,6 +77,17 @@
     "react-native-builder-bob": "^0.36.0",
     "typescript": "^5.6.3"
   },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": ">=0.76.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "module": "lib/module/index.js",
+  "react-native": "src/index.tsx",
+  "source": "src/index.tsx",
   "codegenConfig": {
     "name": "AeropushSpec",
     "type": "modules",
@@ -77,7 +97,7 @@
     },
     "ios": {
       "modulesProvider": {
-        "Aeropush": "AeropushModuleProvider"
+        "Aeropush": "Aeropush"
       }
     }
   },

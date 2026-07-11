@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output (builder-bob)
+lib/
+
+# Native build artifacts — generated into this folder when a host app
+# (example/, OtaTest, any consumer using a file: install) compiles the SDK.
+# These contain machine-local absolute paths and must never be committed.
+android/build/
+android/.cxx/
+android/.gradle/
+android/local.properties
+ios/build/
+
+# Example app
+example/node_modules/
+example/android/build/
+example/android/app/build/
+example/android/.gradle/
+example/ios/Pods/
+example/ios/build/
+example/build/
+
+# CLI output
+aeropush-dist/
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+
+# Packaging
+*.tgz
+
+# OS / editor
+.DS_Store
+*.log

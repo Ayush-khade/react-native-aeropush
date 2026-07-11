@@ -18,6 +18,13 @@
 
 #import <zlib.h>
 
+// The Codegen-generated spec. Kept out of Aeropush.h on purpose: the public
+// header is imported into Swift via the host app's bridging header, and the
+// generated spec header is C++ (Swift can't compile it).
+#ifdef RCT_NEW_ARCH_ENABLED
+#import <AeropushSpec/AeropushSpec.h>
+#endif
+
 // ─── Persistent storage keys (NSUserDefaults) ──────────────────────────────
 // Namespaced with "aeropush_" so we never collide with the host app.
 static NSString *const kActiveBundlePathKey   = @"aeropush_active_bundle_path";
@@ -38,7 +45,11 @@ static NSString *const kDownloadProgressEvent = @"AeropushDownloadProgress";
 
 #pragma mark - Private interface
 
+#ifdef RCT_NEW_ARCH_ENABLED
+@interface Aeropush () <NSURLSessionDownloadDelegate, NativeAeropushSpec>
+#else
 @interface Aeropush () <NSURLSessionDownloadDelegate>
+#endif
 @end
 
 @implementation Aeropush {
@@ -633,5 +644,18 @@ RCT_EXPORT_METHOD(addListener:(NSString *)eventName) {
 RCT_EXPORT_METHOD(removeListeners:(double)count) {
   // No-op: NativeEventEmitter bookkeeping.
 }
+
+#pragma mark - TurboModule registration
+
+#ifdef RCT_NEW_ARCH_ENABLED
+// This class is registered as its own module provider (see codegenConfig
+// "modulesProvider" in package.json). RCTModuleProviders instantiates it and
+// RCTTurboModuleManager, seeing it conforms to RCTTurboModule, initialises it
+// as the module instance and calls this to create the JSI binding.
+- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
+    (const facebook::react::ObjCTurboModule::InitParams &)params {
+  return std::make_shared<facebook::react::NativeAeropushSpecJSI>(params);
+}
+#endif
 
 @end

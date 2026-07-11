@@ -327,9 +327,13 @@ const HARDCODED_UPDATE: UpdateInfo | null = {
   version: 1,
   releaseNotes: 'Hardcoded demo bundle (AeroPush sync pipeline test).',
   isMandatory: false,
-  // Point this at any reachable zip that contains an index.<platform>.bundle.
-  // For local testing you can host one with: `python3 -m http.server`.
-  downloadUrl: 'https://example.com/aeropush/demo-bundle.zip',
+  // Bundles built with `npx aeropush bundle` and uploaded to the test host.
+  // The zip contains main.jsbundle (iOS) / index.android.bundle (Android) at
+  // its root, which is what resolveBundleEntry() expects.
+  downloadUrl: Platform.select({
+    ios: 'https://ota.cavyiot.com/bundles/ios.zip',
+    default: 'https://ota.cavyiot.com/bundles/android.zip',
+  }),
   bundleSize: 0,
   checksum: '',
   fingerprintWarning: false,

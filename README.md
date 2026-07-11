@@ -36,6 +36,10 @@ npm install react-native-aeropush
 cd ios && pod install
 ```
 
+See **[INSTALLATION.md](./INSTALLATION.md)** for the full step-by-step guide —
+including local (unpublished) installs, both AppDelegate / MainApplication
+template generations, Jest mocking, and troubleshooting.
+
 ## Quick start
 
 ```tsx
@@ -134,10 +138,23 @@ npm run ios         # or: npm run android
 ```
 
 The example uses a **hardcoded update** inside the SDK
-(`HARDCODED_UPDATE` in `src/index.tsx`), so it runs without any backend. Point
-`downloadUrl` at a reachable zip containing an `index.<platform>.bundle` to see
-a real download → unzip → stage → restart cycle. (Locally: build one with
-`npm run bundle:android`, zip it, and serve with `python3 -m http.server`.)
+(`HARDCODED_UPDATE` in `src/index.tsx`), so it runs without any backend.
+
+## CLI: building OTA bundles
+
+The package ships a minimal `aeropush` CLI (the full `@aeropush/cli` lands in
+Phase 4). From your app root:
+
+```sh
+npx aeropush bundle
+# → aeropush-dist/ios.zip      (main.jsbundle at zip root)
+# → aeropush-dist/android.zip  (index.android.bundle at zip root)
+```
+
+It runs `react-native bundle --dev false` for each platform and zips the
+output (zero dependencies — the ZIP container is written with Node built-ins).
+Upload the zips to the host referenced by `HARDCODED_UPDATE.downloadUrl` and
+trigger `sync()` in a release build to test the full pipeline.
 
 ## License
 

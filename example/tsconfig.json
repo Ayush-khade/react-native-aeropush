@@ -1,0 +1,7 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "paths": { "react-native-aeropush": ["../src/index"] }
+  },
+  "include": ["src", "index.js"]
+}

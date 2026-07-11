@@ -1,0 +1,108 @@
+{
+  "name": "react-native-aeropush",
+  "version": "0.1.0",
+  "description": "Zero-dependency Over-The-Air update SDK for React Native. New Architecture (Turbo Module) native, server-driven bundle delivery with crash-guard auto-rollback and native fingerprint compatibility checks.",
+  "main": "lib/commonjs/index.js",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/src/index.d.ts",
+  "react-native": "src/index.tsx",
+  "source": "src/index.tsx",
+  "files": [
+    "src",
+    "lib",
+    "android",
+    "ios",
+    "cpp",
+    "*.podspec",
+    "!ios/build",
+    "!android/build",
+    "!android/gradle",
+    "!android/gradlew",
+    "!android/gradlew.bat",
+    "!android/local.properties",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__",
+    "!**/.*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "clean": "del-cli android/build ios/build lib",
+    "prepare": "bob build"
+  },
+  "keywords": [
+    "react-native",
+    "ios",
+    "android",
+    "ota",
+    "over-the-air",
+    "hot-update",
+    "codepush",
+    "turbo-module",
+    "new-architecture",
+    "bundle-update"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aeropush/react-native-aeropush.git"
+  },
+  "author": "AeroPush",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/aeropush/react-native-aeropush/issues"
+  },
+  "homepage": "https://github.com/aeropush/react-native-aeropush#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": ">=0.76.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "del-cli": "^6.0.0",
+    "react": "^19.0.0",
+    "react-native": "^0.79.0",
+    "react-native-builder-bob": "^0.36.0",
+    "typescript": "^5.6.3"
+  },
+  "codegenConfig": {
+    "name": "AeropushSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.aeropush"
+    },
+    "ios": {
+      "modulesProvider": {
+        "Aeropush": "AeropushModuleProvider"
+      }
+    }
+  },
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      [
+        "commonjs",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "module",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "typescript",
+        {
+          "esm": true
+        }
+      ]
+    ]
+  }
+}

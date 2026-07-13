@@ -1,5 +1,6 @@
 import React from 'react';
 import Native from './NativeAeropush';
+import { currentBundleVersion, reportEvent } from './telemetry';
 
 /**
  * AeroPushBoundary — Layer 3 of the crash-guard stack.
@@ -55,6 +56,11 @@ export class AeroPushBoundary extends React.Component<
     // roll back (there's nothing safer to roll back to).
     if (Native.isRunningBundle()) {
       void Native.markBundleFailed(error.message);
+      reportEvent('CRASH_DETECTED', {
+        fromVersion: currentBundleVersion(),
+        errorMessage: error.message,
+        crashLayer: 'ERROR_BOUNDARY',
+      });
     }
     this.props.onError?.(error, info);
   }

@@ -1,6 +1,11 @@
 import { NativeEventEmitter, NativeModules, AppState, Platform } from 'react-native';
 import type { EmitterSubscription, AppStateStatus } from 'react-native';
 import Native from './NativeAeropush';
+import {
+  configureTelemetry,
+  currentBundleVersion,
+  reportEvent,
+} from './telemetry';
 
 /**
  * AeroPush — public SDK surface
@@ -135,6 +140,11 @@ function installCrashHandler(): void {
         error instanceof Error ? error.message : String(error ?? 'unknown');
       // Fire-and-forget; we must not block the crash path.
       void Native.markBundleFailed(message);
+      reportEvent('CRASH_DETECTED', {
+        fromVersion: currentBundleVersion(),
+        errorMessage: message,
+        crashLayer: 'GLOBAL_HANDLER',
+      });
     }
     previous(error, isFatal);
   });
@@ -152,6 +162,11 @@ export function init(userConfig: AeropushConfig): void {
     serverUrl: 'https://api.aeropush.io',
     ...userConfig,
   };
+  configureTelemetry({
+    appKey: config.appKey,
+    channel: config.channel!,
+    serverUrl: config.serverUrl!,
+  });
   installCrashHandler();
 }
 
@@ -164,19 +179,20 @@ export function markBundleHealthy(): Promise<void> {
   return Native.markBundleHealthy();
 }
 
-/** The version number of the bundle currently running (0 = binary bundle). */
+/**
+ * The version number of the bundle the native launcher currently points at
+ * (0 = binary bundle). Parsed from the staged bundle path — see
+ * `currentBundleVersion()` in telemetry.ts. Async for API stability.
+ */
 export async function getCurrentVersion(): Promise<number> {
-  const path = Native.getActiveBundlePath();
-  if (!path) return 0;
-  // Version is encoded in our bundle directory naming; the native side owns
-  // the source of truth. For now we surface via a stored meta file read in a
-  // later phase. Placeholder returns 0 until Phase 2 metadata lands.
-  return 0;
+  return currentBundleVersion();
 }
 
 /** Roll back to the previously installed good bundle (or the binary bundle). */
 export async function rollback(): Promise<void> {
+  const from = currentBundleVersion();
   await Native.clearActiveBundlePath();
+  reportEvent('ROLLBACK_TRIGGERED', { fromVersion: from });
 }
 
 /** Reload the JS runtime to apply a pending bundle. */
@@ -191,11 +207,6 @@ export const unstable_native = Native;
  * Check the server for an update and, if present, download + stage it
  * according to the chosen install mode. This is the primary entry point apps
  * call on launch / resume.
- *
- * NOTE: The network check itself is implemented in Phase 2/3 against the real
- * server contract. This function currently wires the orchestration and the
- * native download/unzip/apply steps; the `/v1/check` fetch is stubbed where
- * indicated so the surface is testable now.
  */
 export async function sync(options: SyncOptions = {}): Promise<SyncStatus> {
   const cfg = requireConfig();
@@ -208,18 +219,21 @@ export async function sync(options: SyncOptions = {}): Promise<SyncStatus> {
     },
   );
 
+  // Captured before staging so the UPDATE_APPLIED / UPDATE_FAILED events can
+  // report the transition, and so a failure mid-install is attributable.
+  const fromVersion = currentBundleVersion();
+  let attempted: UpdateInfo | null = null;
+
   try {
     // ── 1. CHECK ────────────────────────────────────────────────────────
-    // Phase 3 replaces this stub with a real fetch to `${cfg.serverUrl}/v1/check`
-    // sending appKey, channel, current version, platform, and native
-    // fingerprint (Native.getNativeFingerprint()).
-    const update: UpdateInfo | null = await checkForUpdate(cfg);
+    const update: UpdateInfo | null = await checkForUpdate(cfg, fromVersion);
 
     if (!update) {
       options.onUpToDate?.();
       return SyncStatus.UP_TO_DATE;
     }
 
+    attempted = update;
     options.onUpdateAvailable?.(update);
 
     // ── 2. DOWNLOAD ─────────────────────────────────────────────────────
@@ -250,6 +264,11 @@ export async function sync(options: SyncOptions = {}): Promise<SyncStatus> {
     // native counter tightening handled server-side via the warning flag.
     void update.fingerprintWarning;
 
+    reportEvent('UPDATE_APPLIED', {
+      fromVersion,
+      toVersion: update.version,
+    });
+
     // ── 6. INSTALL MODE ─────────────────────────────────────────────────
     switch (installMode) {
       case InstallMode.IMMEDIATE:
@@ -266,6 +285,15 @@ export async function sync(options: SyncOptions = {}): Promise<SyncStatus> {
     }
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
+    // Only report a failure if we actually attempted an install; a network
+    // error during the check itself is not an "update failed".
+    if (attempted) {
+      reportEvent('UPDATE_FAILED', {
+        fromVersion,
+        toVersion: attempted.version,
+        errorMessage: error.message,
+      });
+    }
     options.onError?.(error);
     return SyncStatus.ERROR;
   } finally {
@@ -313,51 +341,68 @@ async function resolveBundleEntry(dir: string): Promise<string> {
 }
 
 /**
- * HARDCODED update check (development / demo mode).
- * -------------------------------------------------
- * In production (Phase 3) this becomes a real fetch to
- * `${cfg.serverUrl}/v1/check` sending appKey, channel, current version,
- * platform, and native fingerprint. For now it returns a fixed UpdateInfo so
- * the entire sync → download → unzip → apply pipeline can be exercised
- * end-to-end against a real bundle URL on a device.
+ * Real update check against `GET ${serverUrl}/v1/check` (OTA.md §10).
  *
- * Set `HARDCODED_UPDATE` to null to simulate the "up to date" branch.
+ * Server contract:
+ *   200 { hasUpdate: true, ... }  → UpdateInfo
+ *   204                            → up to date
+ *   409 { blocked: true }          → fingerprint mismatch; treated as
+ *                                    up-to-date (the device can't take the
+ *                                    bundle until a new binary ships)
+ *   anything else                  → thrown, surfaces via onError
  */
-const HARDCODED_UPDATE: UpdateInfo | null = {
-  version: 1,
-  releaseNotes: 'Hardcoded demo bundle (AeroPush sync pipeline test).',
-  isMandatory: false,
-  // Bundles built with `npx aeropush bundle` and uploaded to the test host.
-  // The zip contains main.jsbundle (iOS) / index.android.bundle (Android) at
-  // its root, which is what resolveBundleEntry() expects.
-  downloadUrl: Platform.select({
-    ios: 'https://ota.cavyiot.com/bundles/ios.zip',
-    default: 'https://ota.cavyiot.com/bundles/android.zip',
-  }),
-  bundleSize: 0,
-  checksum: '',
-  fingerprintWarning: false,
-};
+async function checkForUpdate(
+  cfg: AeropushConfig,
+  currentVersion: number,
+): Promise<UpdateInfo | null> {
+  const base = (cfg.serverUrl ?? '').replace(/\/+$/, '');
+  const res = await fetch(`${base}/v1/check`, {
+    headers: {
+      'X-App-Key': cfg.appKey,
+      'X-Platform': Platform.OS,
+      'X-Channel': cfg.channel ?? 'production',
+      'X-Bundle-Version': String(currentVersion),
+      // X-App-Version (the native binary version) is intentionally omitted:
+      // the native module doesn't expose it yet, and the server skips
+      // target-native-version gating when the header is absent.
+      'X-Native-Fingerprint': Native.getNativeFingerprint() || '',
+    },
+  });
 
-async function checkForUpdate(cfg: AeropushConfig): Promise<UpdateInfo | null> {
-  // Simulate a network round-trip so callers see realistic async behaviour.
-  await new Promise<void>((r) => setTimeout(() => r(), 150));
+  if (res.status === 204) return null;
 
-  const current = await getCurrentVersion();
-  const candidate = HARDCODED_UPDATE;
-  if (!candidate) return null;
-
-  // Only "offer" the update if it's newer than what's running, mirroring the
-  // real server's version-gating so the demo doesn't loop forever.
-  if (candidate.version <= current) return null;
-
-  // Echo the configured channel into the log so the wiring is observable.
-  if (__DEV__) {
-    console.log(
-      `[AeroPush] hardcoded check: channel=${cfg.channel} → v${candidate.version}`,
-    );
+  if (res.status === 409) {
+    // Blocked server-side (native fingerprint mismatch, not force-pushed).
+    // Not an error from the app's point of view — just nothing installable.
+    if (__DEV__) {
+      const body = (await res.json().catch(() => null)) as {
+        message?: string;
+      } | null;
+      console.warn(
+        `[AeroPush] update blocked: ${body?.message ?? 'fingerprint mismatch'}`,
+      );
+    }
+    return null;
   }
-  return candidate;
+
+  if (!res.ok) {
+    throw new Error(`[AeroPush] /v1/check failed with HTTP ${res.status}`);
+  }
+
+  const body = (await res.json()) as Partial<UpdateInfo> & {
+    hasUpdate?: boolean;
+  };
+  if (!body?.hasUpdate || typeof body.version !== 'number') return null;
+
+  return {
+    version: body.version,
+    releaseNotes: String(body.releaseNotes ?? ''),
+    isMandatory: Boolean(body.isMandatory),
+    downloadUrl: String(body.downloadUrl ?? ''),
+    bundleSize: Number(body.bundleSize ?? 0),
+    checksum: String(body.checksum ?? ''),
+    fingerprintWarning: Boolean(body.fingerprintWarning),
+  };
 }
 
 // Re-export the boundary component (Layer 3).

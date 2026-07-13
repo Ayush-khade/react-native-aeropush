@@ -142,6 +142,16 @@ export interface Spec extends TurboModule {
    */
   getNativeFingerprint(): string;
 
+  // ─── INSTALLATION ID ───────────────────────────────────────────────────
+
+  /**
+   * A random UUID generated once per install and persisted natively
+   * (NSUserDefaults / SharedPreferences). Sent — hashed server-side — as the
+   * anonymous device identifier in /v1/event pings. Never derived from any
+   * hardware identifier; carries no PII.
+   */
+  getInstallationId(): string;
+
   // ─── EVENT EMITTER PLUMBING (required by Codegen for events) ───────────
 
   /** Subscribe hook required by the TurboModule event system. */

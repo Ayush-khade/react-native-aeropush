@@ -31,6 +31,7 @@ static NSString *const kActiveBundlePathKey   = @"aeropush_active_bundle_path";
 static NSString *const kPreviousBundlePathKey = @"aeropush_previous_bundle_path";
 static NSString *const kLaunchFailureCountKey = @"aeropush_launch_failure_count";
 static NSString *const kDidBackgroundKey      = @"aeropush_did_background";
+static NSString *const kInstallationIdKey     = @"aeropush_installation_id";
 
 // Consecutive failed launches before we auto-roll back. Mirrors the JS
 // default documented in the SDK config.
@@ -633,6 +634,21 @@ RCT_EXPORT_METHOD(restart) {
   NSString *fp = [[NSBundle mainBundle]
       objectForInfoDictionaryKey:kFingerprintInfoPlistKey];
   return fp ?: @"";
+}
+
+#pragma mark - Installation id
+
+- (NSString *)getInstallationId {
+  NSUserDefaults *defaults = [Aeropush defaults];
+  NSString *existing = [defaults stringForKey:kInstallationIdKey];
+  if (existing.length > 0) {
+    return existing;
+  }
+  // Random per-install UUID — never a hardware identifier, no PII.
+  NSString *fresh = [[NSUUID UUID] UUIDString];
+  [defaults setObject:fresh forKey:kInstallationIdKey];
+  [defaults synchronize];
+  return fresh;
 }
 
 #pragma mark - Event emitter plumbing

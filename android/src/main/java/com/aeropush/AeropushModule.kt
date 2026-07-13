@@ -330,6 +330,17 @@ class AeropushModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // ─── Installation id ─────────────────────────────────────────────────
+
+  override fun getInstallationId(): String {
+    val p = prefs()
+    p.getString(KEY_INSTALL_ID, null)?.let { return it }
+    // Random per-install UUID — never a hardware identifier, no PII.
+    val fresh = java.util.UUID.randomUUID().toString()
+    p.edit().putString(KEY_INSTALL_ID, fresh).apply()
+    return fresh
+  }
+
   // ─── Fingerprint ─────────────────────────────────────────────────────
 
   override fun getNativeFingerprint(): String {
@@ -357,6 +368,7 @@ class AeropushModule(reactContext: ReactApplicationContext) :
     private const val KEY_PREVIOUS = "aeropush_previous_bundle_path"
     private const val KEY_FAIL_COUNT = "aeropush_launch_failure_count"
     private const val KEY_DID_BACKGROUND = "aeropush_did_background"
+    private const val KEY_INSTALL_ID = "aeropush_installation_id"
     private const val FAIL_THRESHOLD = 3
 
     private const val EVENT_PROGRESS = "AeropushDownloadProgress"

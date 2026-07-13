@@ -1,5 +1,5 @@
 # react-native-aeropush
-
+## 🚧 This package is under active development and is not ready for use yet. Please don't install it at this time. Stay tuned—it will be available soon!
 Zero-dependency **Over-The-Air (OTA) update SDK** for React Native, built as a
 New Architecture **Turbo Module**. Ship JavaScript bundle updates to production
 apps without an App Store / Play Store release — with a native crash-guard that

@@ -377,6 +377,15 @@ function safeInstallationId(): string {
   }
 }
 
+/** The app's native bundle identifier, or '' if unavailable. */
+function safeBundleIdentifier(): string {
+  try {
+    return Native.getBundleIdentifier() || '';
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Real update check against `GET ${serverUrl}/v1/api/check` (OTA.md §10).
  *
@@ -429,20 +438,24 @@ async function checkForUpdate(
       // Anonymous, stable per-install id. Lets the server bucket this device
       // for staged rollouts and count adoption. Never PII.
       'X-Device-Id': safeInstallationId(),
+      // Native bundle identifier, read from the binary. The server enforces
+      // that the app key is only used by its own app (§13 scoping).
+      'X-Bundle-Id': safeBundleIdentifier(),
     },
   });
 
   if (res.status === 204) return null;
 
-  if (res.status === 409) {
-    // Blocked server-side (native fingerprint mismatch, not force-pushed).
-    // Not an error from the app's point of view — just nothing installable.
+  if (res.status === 409 || res.status === 403) {
+    // Blocked server-side and NOT an app error — just nothing installable:
+    //   409 → native fingerprint mismatch (not force-pushed)
+    //   403 → app-key bundle-id scoping mismatch (§13)
     if (__DEV__) {
       const body = (await res.json().catch(() => null)) as {
         message?: string;
       } | null;
       console.warn(
-        `[AeroPush] update blocked: ${body?.message ?? 'fingerprint mismatch'}`,
+        `[AeroPush] update blocked: ${body?.message ?? 'incompatible bundle'}`,
       );
     }
     return null;

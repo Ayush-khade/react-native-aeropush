@@ -651,6 +651,13 @@ RCT_EXPORT_METHOD(restart) {
   return fresh;
 }
 
+#pragma mark - Bundle identifier
+
+- (NSString *)getBundleIdentifier {
+  NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+  return bid ?: @"";
+}
+
 #pragma mark - Event emitter plumbing
 
 RCT_EXPORT_METHOD(addListener:(NSString *)eventName) {

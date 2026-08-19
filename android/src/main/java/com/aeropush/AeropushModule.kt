@@ -341,6 +341,13 @@ class AeropushModule(reactContext: ReactApplicationContext) :
     return fresh
   }
 
+  // ─── Bundle identifier ───────────────────────────────────────────────
+
+  override fun getBundleIdentifier(): String {
+    // Android applicationId as installed on the device.
+    return appContext.packageName ?: ""
+  }
+
   // ─── Fingerprint ─────────────────────────────────────────────────────
 
   override fun getNativeFingerprint(): String {

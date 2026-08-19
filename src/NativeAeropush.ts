@@ -152,6 +152,16 @@ export interface Spec extends TurboModule {
    */
   getInstallationId(): string;
 
+  // ─── BUNDLE IDENTIFIER ─────────────────────────────────────────────────
+
+  /**
+   * The app's native bundle identifier read straight from the binary:
+   * iOS `Bundle.main.bundleIdentifier`, Android `packageName`. Sent as
+   * `X-Bundle-Id` on update checks so the server can enforce that an app key
+   * is only ever used by its own app (§13 scoping). Empty string if unavailable.
+   */
+  getBundleIdentifier(): string;
+
   // ─── EVENT EMITTER PLUMBING (required by Codegen for events) ───────────
 
   /** Subscribe hook required by the TurboModule event system. */

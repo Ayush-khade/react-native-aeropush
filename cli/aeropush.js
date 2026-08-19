@@ -25,6 +25,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { zipDirectory } = require('./zip');
+const { computeNativeFingerprint, embedFingerprint } = require('./fingerprint');
 
 const PLATFORMS = {
   ios: { bundleName: 'main.jsbundle', zipName: 'ios.zip' },
@@ -38,8 +39,10 @@ function usage() {
 aeropush — OTA bundle builder + publisher for react-native-aeropush
 
 Usage:
-  aeropush bundle  [options]     Build release bundles + zips (no upload)
-  aeropush release [options]     Build + publish to the AeroPush server
+  aeropush bundle      [options]   Build release bundles + zips (no upload)
+  aeropush release     [options]   Build + publish to the AeroPush server
+  aeropush fingerprint [embed]     Print the native fingerprint, or embed it
+                                   into ios/Info.plist + android/build.gradle
 
 Build options (both commands):
   --platform <ios|android>       One platform only (default: both)
@@ -54,13 +57,17 @@ Release options (release only):
                                  (default: ${DEFAULT_SERVER}; or AEROPUSH_SERVER)
   --channel <name>               Channel to publish to (default: production)
   --notes <text>                 Release notes
-  --fingerprint <sha256:...>     Native fingerprint baked into the binary
+  --fingerprint <value>          Override the native fingerprint (default: it is
+                                 auto-computed from your native dependency set)
+  --no-fingerprint               Publish untagged (universal) — advanced/legacy
   --target <range>               Target native range, e.g. ">=1.2.0 <2.0.0"
   --rollout <1-100>              Staged rollout percentage (default: 100)
   --mandatory                    Mark the release mandatory
   --force                        Force past a fingerprint mismatch (crash risk)
 
 Examples:
+  aeropush fingerprint                 # print the current native fingerprint
+  aeropush fingerprint embed           # bake it into the native projects, then rebuild
   aeropush bundle --platform ios
   AEROPUSH_APP_KEY=apk_live_xxx aeropush release --platform ios --notes "Fix checkout"
 `);
@@ -105,6 +112,8 @@ function parseArgs(argv) {
       args.notes = argv[++i];
     } else if (a === '--fingerprint') {
       args.fingerprint = argv[++i];
+    } else if (a === '--no-fingerprint') {
+      args.noFingerprint = true;
     } else if (a === '--target') {
       args.target = argv[++i];
     } else if (a === '--rollout') {
@@ -232,18 +241,46 @@ async function main() {
     usage();
     process.exit(command ? 0 : 1);
   }
-  if (command !== 'bundle' && command !== 'release') {
-    fail(`unknown command "${command}" (expected "bundle" or "release")`);
+  const KNOWN = ['bundle', 'release', 'fingerprint'];
+  if (!KNOWN.includes(command)) {
+    fail(`unknown command "${command}" (expected ${KNOWN.join(', ')})`);
+  }
+
+  const appRoot = process.cwd();
+
+  // ── fingerprint [embed] ─────────────────────────────────────────────────
+  if (command === 'fingerprint') {
+    const { fingerprint, natives } = computeNativeFingerprint(appRoot);
+    if (rest[0] === 'embed') {
+      const res = embedFingerprint(appRoot, fingerprint);
+      console.log(`\nNative fingerprint: ${fingerprint}`);
+      console.log(`  iOS      ${res.ios.ok ? '✓ ' + res.ios.msg : '✗ ' + res.ios.msg}`);
+      console.log(`  Android  ${res.android.ok ? '✓ ' + res.android.msg : '✗ ' + res.android.msg}`);
+      console.log('\nRebuild the binary for the change to take effect.\n');
+    } else {
+      console.log(`\nNative fingerprint: ${fingerprint}`);
+      console.log(`Computed from ${natives.length} native package${natives.length === 1 ? '' : 's'}:`);
+      for (const n of natives) console.log(`  - ${n}`);
+      console.log(`\nBake it in with:  aeropush fingerprint embed\n`);
+    }
+    return;
   }
 
   const args = parseArgs(rest);
-  const appRoot = process.cwd();
   if (!fs.existsSync(path.join(appRoot, args.entry))) {
     fail(`entry file "${args.entry}" not found in ${appRoot} — run from your app root or pass --entry`);
   }
-
   if (command === 'release' && !args.appKey) {
     fail('release needs an app key — pass --app-key or set AEROPUSH_APP_KEY');
+  }
+
+  // Auto-tag the release with the current native fingerprint unless the
+  // developer overrode it or explicitly opted out. This is what keeps an old
+  // binary from ever receiving a bundle built against different native code.
+  if (command === 'release' && !args.fingerprint && !args.noFingerprint) {
+    args.fingerprint = computeNativeFingerprint(appRoot).fingerprint;
+    console.log(`▸ native fingerprint (auto): ${args.fingerprint}`);
+    console.log(`  (make sure your binary was built after \`aeropush fingerprint embed\`)`);
   }
 
   const cli = findReactNativeCli(appRoot);

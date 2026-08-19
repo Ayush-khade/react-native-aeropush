@@ -7,8 +7,9 @@ apps without an App Store / Play Store release — with a native crash-guard tha
 bundles compiled against incompatible native code.
 
 > Status: early development (v0.1). The client SDK + native layer are
-> implemented. The hosted server, dashboard, and CLI are on the roadmap (see
-> `OTA.md`). The update check is currently **hardcoded** for local testing.
+> implemented, and the SDK talks to a live **AeroPush server + dashboard**
+> (`/v1/api/check`, `/v1/api/event`, `/v1/api/release`). For backend-less
+> testing you can still pass a hardcoded `updateOverride` (see below).
 
 ## Why another OTA library?
 
@@ -46,7 +47,14 @@ template generations, Jest mocking, and troubleshooting.
 import AeroPush, { AeroPushBoundary, InstallMode } from 'react-native-aeropush';
 
 // 1. Initialise once, before your app renders.
-AeroPush.init({ appKey: 'YOUR_APP_KEY', channel: 'production' });
+//    serverUrl defaults to https://ota.cavyiot.com; set it to your own
+//    AeroPush deployment if you self-host. Either the origin or the
+//    `…/v1/api` base is accepted.
+AeroPush.init({
+  appKey: 'YOUR_APP_KEY',
+  channel: 'production',
+  serverUrl: 'https://ota.cavyiot.com',
+});
 
 // 2. Check for and stage updates (e.g. on launch).
 await AeroPush.sync({ installMode: InstallMode.ON_NEXT_RESTART });
@@ -137,24 +145,33 @@ npm run start       # Metro
 npm run ios         # or: npm run android
 ```
 
-The example uses a **hardcoded update** inside the SDK
-(`HARDCODED_UPDATE` in `src/index.tsx`), so it runs without any backend.
+To run the example without a backend, pass `updateOverride` to `init()` — the
+SDK then skips `/v1/api/check` and treats your object as the server response,
+exercising the full download → unzip → stage → restart pipeline against any
+statically hosted zip.
 
-## CLI: building OTA bundles
+## CLI: build & publish OTA bundles
 
 The package ships a minimal `aeropush` CLI (the full `@aeropush/cli` lands in
 Phase 4). From your app root:
 
 ```sh
+# Build release bundles + zips only (no upload):
 npx aeropush bundle
 # → aeropush-dist/ios.zip      (main.jsbundle at zip root)
 # → aeropush-dist/android.zip  (index.android.bundle at zip root)
+
+# Build AND publish to your AeroPush server (POST /v1/api/release):
+AEROPUSH_APP_KEY=apk_live_xxx \
+  npx aeropush release --platform ios --channel production --notes "Fix checkout"
 ```
 
-It runs `react-native bundle --dev false` for each platform and zips the
-output (zero dependencies — the ZIP container is written with Node built-ins).
-Upload the zips to the host referenced by `HARDCODED_UPDATE.downloadUrl` and
-trigger `sync()` in a release build to test the full pipeline.
+`release` accepts `--app-key` (or `AEROPUSH_APP_KEY`), `--server`
+(default `https://ota.cavyiot.com`), `--channel`, `--notes`, `--fingerprint`,
+`--target`, `--rollout <1-100>`, `--mandatory`, and `--force`. It builds with
+`react-native bundle --dev false`, zips the output, and uploads each platform —
+the dashboard then serves it to devices through signed links. Zero dependencies
+(uses Node 18+ global `fetch`/`FormData`).
 
 ## License
 

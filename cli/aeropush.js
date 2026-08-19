@@ -2,15 +2,20 @@
 /**
  * aeropush — minimal CLI (pre-@aeropush/cli).
  *
- * `aeropush bundle` builds release JS bundles for iOS and Android from the
- * host app and zips each into an upload-ready archive whose layout matches
- * what the SDK's sync pipeline expects (platform bundle at the zip root,
- * assets alongside).
+ *   aeropush bundle    Build release JS bundles for iOS/Android and zip each
+ *                      into an upload-ready archive (platform bundle at the zip
+ *                      root, assets alongside) — the layout the SDK's sync
+ *                      pipeline expects.
+ *
+ *   aeropush release   Build (as above) AND publish each zip to an AeroPush
+ *                      server via `POST /v1/api/release` (app-key auth). This
+ *                      is the real OTA push path — the dashboard then serves
+ *                      the bundle to devices through signed links.
  *
  * Zero dependencies — Node built-ins + the host app's own react-native CLI.
- * The full CLI (login/release/fingerprint/rollback, §12 of OTA.md) lands in
- * Phase 4 as @aeropush/cli; this exists so production OTA delivery can be
- * tested before the backend exists.
+ * `release` uses the global fetch/FormData/Blob, so it needs Node 18+.
+ * The full CLI (login/fingerprint/rollback, §12 of OTA.md) lands in Phase 4 as
+ * @aeropush/cli.
  */
 
 'use strict';
@@ -26,31 +31,58 @@ const PLATFORMS = {
   android: { bundleName: 'index.android.bundle', zipName: 'android.zip' },
 };
 
+const DEFAULT_SERVER = process.env.AEROPUSH_SERVER || 'https://ota.cavyiot.com';
+
 function usage() {
   console.log(`
-aeropush — OTA bundle builder for react-native-aeropush
+aeropush — OTA bundle builder + publisher for react-native-aeropush
 
 Usage:
-  aeropush bundle [options]     Build release bundles + zips for upload
+  aeropush bundle  [options]     Build release bundles + zips (no upload)
+  aeropush release [options]     Build + publish to the AeroPush server
 
-Options:
-  --platform <ios|android>      Build one platform only (default: both)
-  --entry <file>                Entry file (default: index.js)
-  --out <dir>                   Output directory (default: aeropush-dist)
-  --sourcemaps                  Also emit .map files next to the zips
+Build options (both commands):
+  --platform <ios|android>       One platform only (default: both)
+  --entry <file>                 Entry file (default: index.js)
+  --out <dir>                    Output directory (default: aeropush-dist)
+  --sourcemaps                   Also emit .map files next to the zips
 
-Output:
-  <out>/ios.zip        contains main.jsbundle (+ assets)
-  <out>/android.zip    contains index.android.bundle (+ assets)
+Release options (release only):
+  --app-key <key>                App key from the dashboard  [required]
+                                 (or set AEROPUSH_APP_KEY)
+  --server <url>                 AeroPush base URL
+                                 (default: ${DEFAULT_SERVER}; or AEROPUSH_SERVER)
+  --channel <name>               Channel to publish to (default: production)
+  --notes <text>                 Release notes
+  --fingerprint <sha256:...>     Native fingerprint baked into the binary
+  --target <range>               Target native range, e.g. ">=1.2.0 <2.0.0"
+  --rollout <1-100>              Staged rollout percentage (default: 100)
+  --mandatory                    Mark the release mandatory
+  --force                        Force past a fingerprint mismatch (crash risk)
 
-Upload each zip to your bundle host, e.g.:
-  https://ota.cavyiot.com/bundles/ios.zip
-  https://ota.cavyiot.com/bundles/android.zip
+Examples:
+  aeropush bundle --platform ios
+  AEROPUSH_APP_KEY=apk_live_xxx aeropush release --platform ios --notes "Fix checkout"
 `);
 }
 
 function parseArgs(argv) {
-  const args = { platforms: Object.keys(PLATFORMS), entry: 'index.js', out: 'aeropush-dist', sourcemaps: false };
+  const args = {
+    platforms: Object.keys(PLATFORMS),
+    entry: 'index.js',
+    out: 'aeropush-dist',
+    sourcemaps: false,
+    // release-only
+    appKey: process.env.AEROPUSH_APP_KEY || '',
+    server: DEFAULT_SERVER,
+    channel: 'production',
+    notes: '',
+    fingerprint: '',
+    target: '',
+    rollout: 100,
+    mandatory: false,
+    force: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--platform') {
@@ -63,6 +95,25 @@ function parseArgs(argv) {
       args.out = argv[++i];
     } else if (a === '--sourcemaps') {
       args.sourcemaps = true;
+    } else if (a === '--app-key') {
+      args.appKey = argv[++i];
+    } else if (a === '--server') {
+      args.server = argv[++i];
+    } else if (a === '--channel') {
+      args.channel = argv[++i];
+    } else if (a === '--notes') {
+      args.notes = argv[++i];
+    } else if (a === '--fingerprint') {
+      args.fingerprint = argv[++i];
+    } else if (a === '--target') {
+      args.target = argv[++i];
+    } else if (a === '--rollout') {
+      args.rollout = parseInt(argv[++i], 10);
+      if (!(args.rollout >= 1 && args.rollout <= 100)) fail('--rollout must be 1-100');
+    } else if (a === '--mandatory') {
+      args.mandatory = true;
+    } else if (a === '--force') {
+      args.force = true;
     } else if (a === '--help' || a === '-h') {
       usage();
       process.exit(0);
@@ -76,6 +127,18 @@ function parseArgs(argv) {
 function fail(msg) {
   console.error(`\n✗ aeropush: ${msg}\n`);
   process.exit(1);
+}
+
+/**
+ * Normalise a configured base URL to the `…/v1/api` REST base the backend
+ * serves. Accepts the origin, `…/v1`, or the full `…/v1/api` (mirrors the SDK's
+ * resolveApiBase so the CLI, SDK and dashboard agree on one URL shape).
+ */
+function resolveApiBase(serverUrl) {
+  const trimmed = String(serverUrl || '').replace(/\/+$/, '');
+  if (/\/v1\/api$/.test(trimmed)) return trimmed;
+  if (/\/v1$/.test(trimmed)) return `${trimmed}/api`;
+  return `${trimmed}/v1/api`;
 }
 
 function findReactNativeCli(appRoot) {
@@ -126,28 +189,77 @@ function buildPlatform(appRoot, cli, platform, args) {
   return zipPath;
 }
 
-function main() {
+/** Publish a built zip to the AeroPush server via POST /v1/api/release. */
+async function uploadRelease(zipPath, platform, args) {
+  if (typeof fetch === 'undefined' || typeof FormData === 'undefined') {
+    fail('release needs Node 18+ (global fetch/FormData). Upgrade Node, or use `aeropush bundle` and upload from CI.');
+  }
+  const url = `${resolveApiBase(args.server)}/release`;
+  const buf = fs.readFileSync(zipPath);
+
+  const form = new FormData();
+  form.append('platform', platform);
+  form.append('channel', args.channel);
+  form.append('rollout_percentage', String(args.rollout));
+  form.append('is_mandatory', String(args.mandatory));
+  form.append('force_push', String(args.force));
+  if (args.notes) form.append('release_notes', args.notes);
+  if (args.fingerprint) form.append('native_fingerprint', args.fingerprint);
+  if (args.target) form.append('target_range', args.target);
+  form.append('bundle', new Blob([buf], { type: 'application/zip' }), 'bundle.zip');
+
+  console.log(`\n▸ [${platform}] publishing to ${url} (channel ${args.channel})…`);
+  let res;
+  try {
+    res = await fetch(url, { method: 'POST', headers: { 'X-App-Key': args.appKey }, body: form });
+  } catch (e) {
+    fail(`[${platform}] network error reaching ${url}: ${e.message}`);
+  }
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text;
+    try { msg = JSON.parse(text).error || text; } catch {}
+    fail(`[${platform}] publish failed (HTTP ${res.status}): ${msg}`);
+  }
+  const data = JSON.parse(text);
+  console.log(`✓ [${platform}] published v${data.version ?? data.release?.version}  (${data.checksum ?? ''})`);
+  return data;
+}
+
+async function main() {
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === '--help' || command === '-h') {
     usage();
     process.exit(command ? 0 : 1);
   }
-  if (command !== 'bundle') fail(`unknown command "${command}" (only "bundle" exists for now)`);
+  if (command !== 'bundle' && command !== 'release') {
+    fail(`unknown command "${command}" (expected "bundle" or "release")`);
+  }
 
   const args = parseArgs(rest);
   const appRoot = process.cwd();
   if (!fs.existsSync(path.join(appRoot, args.entry))) {
     fail(`entry file "${args.entry}" not found in ${appRoot} — run from your app root or pass --entry`);
   }
-  const cli = findReactNativeCli(appRoot);
 
-  const zips = args.platforms.map((p) => buildPlatform(appRoot, cli, p, args));
-
-  console.log(`\nDone. Upload to your bundle host, e.g.:`);
-  for (const z of zips) {
-    console.log(`  ${path.basename(z)}  →  https://ota.cavyiot.com/bundles/${path.basename(z)}`);
+  if (command === 'release' && !args.appKey) {
+    fail('release needs an app key — pass --app-key or set AEROPUSH_APP_KEY');
   }
-  console.log('');
+
+  const cli = findReactNativeCli(appRoot);
+  const zips = args.platforms.map((p) => [p, buildPlatform(appRoot, cli, p, args)]);
+
+  if (command === 'bundle') {
+    console.log(`\nDone. Publish with:  aeropush release --app-key <key>`);
+    console.log(`(or POST each zip to ${resolveApiBase(args.server)}/release with an X-App-Key header)\n`);
+    return;
+  }
+
+  // command === 'release'
+  for (const [platform, zipPath] of zips) {
+    await uploadRelease(zipPath, platform, args);
+  }
+  console.log(`\n✓ All done. View the release in the dashboard: ${String(args.server).replace(/\/+$/, '')}/v1/dashboard\n`);
 }
 
-main();
+main().catch((e) => fail(e && e.message ? e.message : String(e)));

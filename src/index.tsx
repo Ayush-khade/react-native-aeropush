@@ -5,6 +5,7 @@ import {
   configureTelemetry,
   currentBundleVersion,
   reportEvent,
+  resolveApiBase,
 } from './telemetry';
 
 /**
@@ -44,7 +45,25 @@ export interface AeropushConfig {
    * authoritative value lives natively.
    */
   crashRollbackThreshold?: number;
+  /**
+   * DEVELOPMENT / TESTING ONLY. When set, `sync()` skips the network call to
+   * `/v1/api/check` and treats this as the server's response instead. Lets the
+   * full download → unzip → stage → restart pipeline be exercised against a
+   * statically hosted zip before a backend exists (or while it is down).
+   *
+   * Still version-gated: the update is only offered if `version` is greater
+   * than the bundle currently running, so it won't loop forever. Pass a
+   * function to decide lazily (e.g. per platform).
+   */
+  updateOverride?: UpdateOverride | (() => UpdateOverride);
 }
+
+/**
+ * A hand-written stand-in for the `/v1/api/check` response. Only `version` and
+ * `downloadUrl` are required; the rest default to safe values.
+ */
+export type UpdateOverride = Pick<UpdateInfo, 'version' | 'downloadUrl'> &
+  Partial<Omit<UpdateInfo, 'version' | 'downloadUrl'>>;
 
 export interface UpdateInfo {
   /** Monotonic bundle version on the server. */
@@ -159,7 +178,7 @@ function installCrashHandler(): void {
 export function init(userConfig: AeropushConfig): void {
   config = {
     channel: 'production',
-    serverUrl: 'https://api.aeropush.io',
+    serverUrl: 'https://ota.cavyiot.com',
     ...userConfig,
   };
   configureTelemetry({
@@ -340,8 +359,26 @@ async function resolveBundleEntry(dir: string): Promise<string> {
   );
 }
 
+/** The baked-in native fingerprint, or '' if the native module isn't linked. */
+function safeNativeFingerprint(): string {
+  try {
+    return Native.getNativeFingerprint() || '';
+  } catch {
+    return '';
+  }
+}
+
+/** The anonymous per-install id, or '' if unavailable. */
+function safeInstallationId(): string {
+  try {
+    return Native.getInstallationId() || '';
+  } catch {
+    return '';
+  }
+}
+
 /**
- * Real update check against `GET ${serverUrl}/v1/check` (OTA.md §10).
+ * Real update check against `GET ${serverUrl}/v1/api/check` (OTA.md §10).
  *
  * Server contract:
  *   200 { hasUpdate: true, ... }  → UpdateInfo
@@ -355,8 +392,31 @@ async function checkForUpdate(
   cfg: AeropushConfig,
   currentVersion: number,
 ): Promise<UpdateInfo | null> {
-  const base = (cfg.serverUrl ?? '').replace(/\/+$/, '');
-  const res = await fetch(`${base}/v1/check`, {
+  // ── Hardcoded response (see AeropushConfig.updateOverride) ──────────────
+  if (cfg.updateOverride) {
+    const raw =
+      typeof cfg.updateOverride === 'function'
+        ? cfg.updateOverride()
+        : cfg.updateOverride;
+    if (__DEV__) {
+      console.log(
+        `[AeroPush] updateOverride active — skipping /v1/api/check (v${raw.version}, running v${currentVersion})`,
+      );
+    }
+    if (raw.version <= currentVersion) return null;
+    return {
+      version: raw.version,
+      downloadUrl: raw.downloadUrl,
+      releaseNotes: raw.releaseNotes ?? '',
+      isMandatory: raw.isMandatory ?? false,
+      bundleSize: raw.bundleSize ?? 0,
+      checksum: raw.checksum ?? '',
+      fingerprintWarning: raw.fingerprintWarning ?? false,
+    };
+  }
+
+  const base = resolveApiBase(cfg.serverUrl ?? '');
+  const res = await fetch(`${base}/check`, {
     headers: {
       'X-App-Key': cfg.appKey,
       'X-Platform': Platform.OS,
@@ -365,7 +425,10 @@ async function checkForUpdate(
       // X-App-Version (the native binary version) is intentionally omitted:
       // the native module doesn't expose it yet, and the server skips
       // target-native-version gating when the header is absent.
-      'X-Native-Fingerprint': Native.getNativeFingerprint() || '',
+      'X-Native-Fingerprint': safeNativeFingerprint(),
+      // Anonymous, stable per-install id. Lets the server bucket this device
+      // for staged rollouts and count adoption. Never PII.
+      'X-Device-Id': safeInstallationId(),
     },
   });
 
@@ -386,7 +449,7 @@ async function checkForUpdate(
   }
 
   if (!res.ok) {
-    throw new Error(`[AeroPush] /v1/check failed with HTTP ${res.status}`);
+    throw new Error(`[AeroPush] /v1/api/check failed with HTTP ${res.status}`);
   }
 
   const body = (await res.json()) as Partial<UpdateInfo> & {

@@ -16,14 +16,36 @@ import Native from './NativeAeropush';
 interface ServerConfig {
   appKey: string;
   channel: string;
+  /** The raw base the developer configured (origin, or …/v1, or …/v1/api). */
   serverUrl: string;
+  /** Normalised REST base — always the `…/v1/api` form the backend serves. */
+  apiUrl: string;
 }
 
 let serverConfig: ServerConfig | null = null;
 
+/**
+ * Resolve the REST API base from whatever the developer passed as `serverUrl`.
+ * The AeroPush backend serves its endpoints under `…/v1/api` (with `…/v1/*`
+ * aliases). To be forgiving, we accept the origin (`https://host`), the
+ * versioned root (`…/v1`) or the full base (`…/v1/api`) and always return the
+ * `…/v1/api` form, so the SDK, CLI and dashboard all agree on one URL shape.
+ */
+export function resolveApiBase(serverUrl: string): string {
+  const trimmed = serverUrl.replace(/\/+$/, '');
+  if (/\/v1\/api$/.test(trimmed)) return trimmed;
+  if (/\/v1$/.test(trimmed)) return `${trimmed}/api`;
+  return `${trimmed}/v1/api`;
+}
+
 /** Called by `init()`. Trailing slashes are normalised away once, here. */
-export function configureTelemetry(cfg: ServerConfig): void {
-  serverConfig = { ...cfg, serverUrl: cfg.serverUrl.replace(/\/+$/, '') };
+export function configureTelemetry(cfg: {
+  appKey: string;
+  channel: string;
+  serverUrl: string;
+}): void {
+  const serverUrl = cfg.serverUrl.replace(/\/+$/, '');
+  serverConfig = { ...cfg, serverUrl, apiUrl: resolveApiBase(serverUrl) };
 }
 
 export function getServerConfig(): ServerConfig | null {
@@ -83,7 +105,7 @@ export function reportEvent(event: AeropushEventType, details: EventDetails = {}
       timestamp: new Date().toISOString(),
       ...details,
     });
-    void fetch(`${cfg.serverUrl}/v1/event`, {
+    void fetch(`${cfg.apiUrl}/event`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -248,9 +248,14 @@ async function main() {
 
   const appRoot = process.cwd();
 
-  // ── fingerprint [embed] ─────────────────────────────────────────────────
+  // ── fingerprint [embed|--value] ─────────────────────────────────────────
   if (command === 'fingerprint') {
     const { fingerprint, natives } = computeNativeFingerprint(appRoot);
+    // Machine-readable: print ONLY the value (for build-system hooks).
+    if (rest.includes('--value')) {
+      process.stdout.write(fingerprint);
+      return;
+    }
     if (rest[0] === 'embed') {
       const res = embedFingerprint(appRoot, fingerprint);
       console.log(`\nNative fingerprint: ${fingerprint}`);

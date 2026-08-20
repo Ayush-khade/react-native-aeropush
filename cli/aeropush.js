@@ -23,9 +23,49 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const readline = require('readline');
+const { spawn } = require('child_process');
 const { zipDirectory } = require('./zip');
 const { computeNativeFingerprint, embedFingerprint } = require('./fingerprint');
+
+// ─── Branding: replace Metro's welcome logo with an AeroPush banner ───────────
+
+function printAeropushBanner(platform) {
+  const A = '\x1b[38;5;214m'; // amber
+  const B = '\x1b[1m';
+  const D = '\x1b[2m';
+  const R = '\x1b[0m';
+  process.stdout.write(
+    `\n  ${A}▲${R}    ${B}AeroPush${R} ${D}· over-the-air bundler${R}\n` +
+      `  ${A}▲▲▲${R}  ${D}bundling ${platform} (release)${R}\n\n`
+  );
+}
+
+// True for the lines that make up Metro's welcome logo/banner, which we hide.
+function isMetroLogo(line) {
+  const s = line.replace(/\x1b\[[0-9;]*m/g, ''); // strip ANSI
+  if (/Welcome to Metro/.test(s)) return true;
+  if (/Fast\s*-\s*Scalable\s*-\s*Integrated/.test(s)) return true;
+  // logo art rows: only block-drawing characters + whitespace
+  if (/[▓▒░█▄▀]/.test(s) && /^[\s▓▒░█▄▀]*$/.test(s)) return true;
+  return false;
+}
+
+/** Run a child process, streaming its output live but dropping Metro's logo. */
+function runFiltered(cmd, cliArgs, cwd) {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, cliArgs, { cwd, stdio: ['inherit', 'pipe', 'pipe'] });
+    const pipe = (input, out) => {
+      readline.createInterface({ input }).on('line', (l) => {
+        if (!isMetroLogo(l)) out.write(l + '\n');
+      });
+    };
+    pipe(child.stdout, process.stdout);
+    pipe(child.stderr, process.stderr);
+    child.on('close', (code) => resolve(code ?? 1));
+    child.on('error', () => resolve(1));
+  });
+}
 
 const PLATFORMS = {
   ios: { bundleName: 'main.jsbundle', zipName: 'ios.zip' },
@@ -163,13 +203,13 @@ function findReactNativeCli(appRoot) {
   }
 }
 
-function buildPlatform(appRoot, cli, platform, args) {
+async function buildPlatform(appRoot, cli, platform, args) {
   const { bundleName, zipName } = PLATFORMS[platform];
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), `aeropush-${platform}-`));
   const bundleOut = path.join(staging, bundleName);
   const mapOut = path.join(appRoot, args.out, `${platform}.jsbundle.map`);
 
-  console.log(`\n▸ [${platform}] bundling (release, --dev false)…`);
+  printAeropushBanner(platform);
   const cliArgs = [
     cli,
     'bundle',
@@ -185,8 +225,8 @@ function buildPlatform(appRoot, cli, platform, args) {
     cliArgs.push('--sourcemap-output', mapOut);
   }
 
-  const res = spawnSync(process.execPath, cliArgs, { cwd: appRoot, stdio: 'inherit' });
-  if (res.status !== 0) fail(`[${platform}] react-native bundle failed (exit ${res.status})`);
+  const code = await runFiltered(process.execPath, cliArgs, appRoot);
+  if (code !== 0) fail(`[${platform}] react-native bundle failed (exit ${code})`);
   if (!fs.existsSync(bundleOut)) fail(`[${platform}] expected bundle at ${bundleOut} but it was not produced`);
 
   const zipPath = path.join(appRoot, args.out, zipName);
@@ -289,7 +329,10 @@ async function main() {
   }
 
   const cli = findReactNativeCli(appRoot);
-  const zips = args.platforms.map((p) => [p, buildPlatform(appRoot, cli, p, args)]);
+  const zips = [];
+  for (const p of args.platforms) {
+    zips.push([p, await buildPlatform(appRoot, cli, p, args)]);
+  }
 
   if (command === 'bundle') {
     console.log(`\nDone. Publish with:  aeropush release --app-key <key>`);

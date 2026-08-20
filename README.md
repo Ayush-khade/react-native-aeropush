@@ -47,13 +47,13 @@ template generations, Jest mocking, and troubleshooting.
 import AeroPush, { AeroPushBoundary, InstallMode } from 'react-native-aeropush';
 
 // 1. Initialise once, before your app renders.
-//    serverUrl defaults to https://ota.cavyiot.com; set it to your own
+//    serverUrl defaults to https://aeropush.tech; set it to your own
 //    AeroPush deployment if you self-host. Either the origin or the
 //    `…/v1/api` base is accepted.
 AeroPush.init({
   appKey: 'YOUR_APP_KEY',
   channel: 'production',
-  serverUrl: 'https://ota.cavyiot.com',
+  serverUrl: 'https://aeropush.tech',
 });
 
 // 2. Check for and stage updates (e.g. on launch).
@@ -167,7 +167,7 @@ AEROPUSH_APP_KEY=apk_live_xxx \
 ```
 
 `release` accepts `--app-key` (or `AEROPUSH_APP_KEY`), `--server`
-(default `https://ota.cavyiot.com`), `--channel`, `--notes`, `--fingerprint`,
+(default `https://aeropush.tech`), `--channel`, `--notes`, `--fingerprint`,
 `--target`, `--rollout <1-100>`, `--mandatory`, and `--force`. It builds with
 `react-native bundle --dev false`, zips the output, and uploads each platform —
 the dashboard then serves it to devices through signed links. Zero dependencies

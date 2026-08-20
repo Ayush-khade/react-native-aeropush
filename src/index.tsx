@@ -178,7 +178,7 @@ function installCrashHandler(): void {
 export function init(userConfig: AeropushConfig): void {
   config = {
     channel: 'production',
-    serverUrl: 'https://ota.cavyiot.com',
+    serverUrl: 'https://aeropush.tech',
     ...userConfig,
   };
   configureTelemetry({

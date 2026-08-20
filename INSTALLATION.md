@@ -308,7 +308,7 @@ download → unzip → stage → restart cycle:
    Options: `--platform ios|android`, `--entry <file>`, `--out <dir>`,
    `--sourcemaps`. Add `aeropush-dist/` to your `.gitignore`.
 2. Upload the zips to the bundle host referenced by `HARDCODED_UPDATE.downloadUrl`
-   (currently `https://ota.cavyiot.com/bundles/{ios,android}.zip`).
+   (currently `https://aeropush.tech/bundles/{ios,android}.zip`).
 3. Run the app in **release mode**, trigger `sync()`, then restart the app —
    it should boot from the downloaded bundle (`Running OTA bundle: yes`).
 

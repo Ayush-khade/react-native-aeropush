@@ -162,7 +162,7 @@ const PLATFORMS = {
   android: { bundleName: 'index.android.bundle', zipName: 'android.zip' },
 };
 
-const DEFAULT_SERVER = process.env.AEROPUSH_SERVER || 'https://ota.cavyiot.com';
+const DEFAULT_SERVER = process.env.AEROPUSH_SERVER || 'https://aeropush.tech';
 
 function usage() {
   console.log(`

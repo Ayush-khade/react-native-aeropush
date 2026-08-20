@@ -281,7 +281,10 @@ class AeropushModule(reactContext: ReactApplicationContext) :
     // process. On the New Architecture the ReactHost owns reloads; on the
     // bridge architecture the ReactInstanceManager does. We reflectively
     // pick whichever the host app exposes so we depend on neither directly.
-    val activity = currentActivity ?: reactApplicationContext.currentActivity
+    // `reactApplicationContext.currentActivity` is what the module's own
+    // getCurrentActivity() delegates to; use it directly (RN 0.87's Kotlin no
+    // longer resolves the inherited `currentActivity` as a property).
+    val activity = reactApplicationContext.currentActivity
     val runnable = Runnable {
       val app = appContext.applicationContext
       if (!invokeReactHostReload(app)) {

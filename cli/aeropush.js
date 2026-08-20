@@ -67,6 +67,98 @@ function runFiltered(cmd, cliArgs, cwd) {
   });
 }
 
+// ─── Big block-logo release banner ───────────────────────────────────────────
+
+const LOGO_FONT = {
+  A: [' ███ ', '█   █', '█████', '█   █', '█   █'],
+  E: ['█████', '█    ', '████ ', '█    ', '█████'],
+  R: ['████ ', '█   █', '████ ', '█  █ ', '█   █'],
+  O: [' ███ ', '█   █', '█   █', '█   █', ' ███ '],
+  P: ['████ ', '█   █', '████ ', '█    ', '█    '],
+  U: ['█   █', '█   █', '█   █', '█   █', ' ███ '],
+  S: [' ████', '█    ', ' ███ ', '    █', '████ '],
+  H: ['█   █', '█   █', '█████', '█   █', '█   █'],
+};
+
+function renderLogo(text) {
+  const rows = ['', '', '', '', ''];
+  for (const ch of text.toUpperCase()) {
+    const g = LOGO_FONT[ch] || ['     ', '     ', '     ', '     ', '     '];
+    for (let i = 0; i < 5; i++) rows[i] += g[i] + ' ';
+  }
+  return rows;
+}
+
+function readProjectInfo(appRoot, args) {
+  let name = '', version = '';
+  try {
+    const aj = JSON.parse(fs.readFileSync(path.join(appRoot, 'app.json'), 'utf8'));
+    name = aj.displayName || aj.name || '';
+  } catch {}
+  try {
+    const pj = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
+    if (!name) name = pj.name || '';
+    version = pj.version || '';
+  } catch {}
+  const platform =
+    args.platforms.length === 2
+      ? 'iOS + Android'
+      : args.platforms[0] === 'ios'
+        ? 'iOS'
+        : 'Android';
+  const env = args.channel.charAt(0).toUpperCase() + args.channel.slice(1);
+  return { name: name || 'App', version: version || '—', platform, env };
+}
+
+function printReleaseBanner(info) {
+  const W = '\x1b[1m\x1b[97m'; // bold bright white
+  const D = '\x1b[2m';
+  const R = '\x1b[0m';
+  const out = process.stdout;
+  out.write('\n');
+  for (const row of renderLogo('AEROPUSH')) out.write('  ' + W + row + R + '\n');
+  out.write('\n  AeroPush — React Native OTA Platform\n\n');
+  const rows = [
+    ['Project', info.name],
+    ['Platform', info.platform],
+    ['Version', info.version],
+    ['Environment', info.env],
+  ];
+  for (const [k, v] of rows) out.write(`  ✓ ${k.padEnd(13)}${D}${v}${R}\n`);
+  out.write('\n');
+}
+
+// ─── Upload progress bar ─────────────────────────────────────────────────────
+
+function drawBar(pct) {
+  const width = 34;
+  const filled = Math.max(0, Math.min(width, Math.round((pct / 100) * width)));
+  let bar = '█'.repeat(filled);
+  if (filled < width) bar += '▓' + '░'.repeat(width - filled - 1);
+  process.stdout.write(`\r  ${bar}  ${String(Math.round(pct)).padStart(2)}%`);
+}
+
+/** Show an animated bar while `task` runs; completes to 100% on success. */
+async function withProgress(label, task) {
+  process.stdout.write(`  → ${label}\n`);
+  let pct = 0;
+  const timer = setInterval(() => {
+    pct = Math.min(pct + 7, 92);
+    drawBar(pct);
+  }, 100);
+  try {
+    const result = await task;
+    clearInterval(timer);
+    drawBar(100);
+    process.stdout.write('\n');
+    return result;
+  } catch (e) {
+    clearInterval(timer);
+    process.stdout.write('\n');
+    throw e;
+  }
+}
+
 const PLATFORMS = {
   ios: { bundleName: 'main.jsbundle', zipName: 'ios.zip' },
   android: { bundleName: 'index.android.bundle', zipName: 'android.zip' },
@@ -257,7 +349,6 @@ async function uploadRelease(zipPath, platform, args) {
   if (args.target) form.append('target_range', args.target);
   form.append('bundle', new Blob([buf], { type: 'application/zip' }), 'bundle.zip');
 
-  console.log(`\n▸ [${platform}] publishing to ${url} (channel ${args.channel})…`);
   let res;
   try {
     res = await fetch(url, { method: 'POST', headers: { 'X-App-Key': args.appKey }, body: form });
@@ -270,9 +361,7 @@ async function uploadRelease(zipPath, platform, args) {
     try { msg = JSON.parse(text).error || text; } catch {}
     fail(`[${platform}] publish failed (HTTP ${res.status}): ${msg}`);
   }
-  const data = JSON.parse(text);
-  console.log(`✓ [${platform}] published v${data.version ?? data.release?.version}  (${data.checksum ?? ''})`);
-  return data;
+  return JSON.parse(text);
 }
 
 async function main() {
@@ -319,13 +408,17 @@ async function main() {
     fail('release needs an app key — pass --app-key or set AEROPUSH_APP_KEY');
   }
 
+  // The full block-logo banner up front for a release.
+  if (command === 'release') {
+    printReleaseBanner(readProjectInfo(appRoot, args));
+  }
+
   // Auto-tag the release with the current native fingerprint unless the
   // developer overrode it or explicitly opted out. This is what keeps an old
   // binary from ever receiving a bundle built against different native code.
   if (command === 'release' && !args.fingerprint && !args.noFingerprint) {
     args.fingerprint = computeNativeFingerprint(appRoot).fingerprint;
-    console.log(`▸ native fingerprint (auto): ${args.fingerprint}`);
-    console.log(`  (make sure your binary was built after \`aeropush fingerprint embed\`)`);
+    console.log(`  ${'\x1b[2m'}native fingerprint (auto): ${args.fingerprint}${'\x1b[0m'}\n`);
   }
 
   const cli = findReactNativeCli(appRoot);
@@ -340,11 +433,20 @@ async function main() {
     return;
   }
 
-  // command === 'release'
+  // command === 'release' — upload each platform with a progress bar
+  const published = [];
   for (const [platform, zipPath] of zips) {
-    await uploadRelease(zipPath, platform, args);
+    const data = await withProgress(
+      `Uploading ${platform} bundle...`,
+      uploadRelease(zipPath, platform, args)
+    );
+    published.push([platform, data.version ?? data.release?.version]);
   }
-  console.log(`\n✓ All done. View the release in the dashboard: ${String(args.server).replace(/\/+$/, '')}/v1/dashboard\n`);
+  process.stdout.write('\n');
+  for (const [platform, v] of published) {
+    console.log(`  \x1b[38;5;114m✓\x1b[0m ${platform} · v${v} published`);
+  }
+  console.log(`\n  🚀 Ready to deploy  ${'\x1b[2m'}· ${String(args.server).replace(/\/+$/, '')}/v1/dashboard${'\x1b[0m'}\n`);
 }
 
 main().catch((e) => fail(e && e.message ? e.message : String(e)));

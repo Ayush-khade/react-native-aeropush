@@ -23,47 +23,45 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const readline = require('readline');
 const { spawn } = require('child_process');
 const { zipDirectory } = require('./zip');
 const { computeNativeFingerprint, embedFingerprint } = require('./fingerprint');
 
-// ─── Branding: replace Metro's welcome logo with an AeroPush banner ───────────
+// ─── Quiet bundling: hide Metro's logo + warnings, show a spinner ─────────────
 
-function printAeropushBanner(platform) {
-  const A = '\x1b[38;5;214m'; // amber
-  const B = '\x1b[1m';
-  const D = '\x1b[2m';
-  const R = '\x1b[0m';
-  process.stdout.write(
-    `\n  ${A}▲${R}    ${B}AeroPush${R} ${D}· over-the-air bundler${R}\n` +
-      `  ${A}▲▲▲${R}  ${D}bundling ${platform} (release)${R}\n\n`
-  );
-}
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-// True for the lines that make up Metro's welcome logo/banner, which we hide.
-function isMetroLogo(line) {
-  const s = line.replace(/\x1b\[[0-9;]*m/g, ''); // strip ANSI
-  if (/Welcome to Metro/.test(s)) return true;
-  if (/Fast\s*-\s*Scalable\s*-\s*Integrated/.test(s)) return true;
-  // logo art rows: only block-drawing characters + whitespace
-  if (/[▓▒░█▄▀]/.test(s) && /^[\s▓▒░█▄▀]*$/.test(s)) return true;
-  return false;
-}
-
-/** Run a child process, streaming its output live but dropping Metro's logo. */
-function runFiltered(cmd, cliArgs, cwd) {
+/**
+ * Run the bundle command with its output captured (not shown). A spinner runs
+ * while it works. Metro's logo, warnings and progress noise stay hidden on
+ * success; the full captured output is dumped only if the build FAILS, so
+ * errors are never swallowed.
+ */
+function runQuietly(cmd, cliArgs, cwd, label) {
   return new Promise((resolve) => {
     const child = spawn(cmd, cliArgs, { cwd, stdio: ['inherit', 'pipe', 'pipe'] });
-    const pipe = (input, out) => {
-      readline.createInterface({ input }).on('line', (l) => {
-        if (!isMetroLogo(l)) out.write(l + '\n');
-      });
+    let buf = '';
+    child.stdout.on('data', (d) => (buf += d));
+    child.stderr.on('data', (d) => (buf += d));
+    let i = 0;
+    const D = '\x1b[2m';
+    const R = '\x1b[0m';
+    const tty = process.stdout.isTTY;
+    // Animate a spinner on a TTY; on a pipe/CI just print the label once.
+    if (!tty) process.stdout.write(`  ${label}\n`);
+    const spin = tty
+      ? setInterval(() => {
+          process.stdout.write(`\r  ${SPINNER[i++ % SPINNER.length]} ${D}${label}${R}`);
+        }, 80)
+      : null;
+    const stop = (code) => {
+      if (spin) clearInterval(spin);
+      if (tty) process.stdout.write('\r\x1b[K'); // clear the spinner line
+      if (code !== 0) process.stderr.write(buf); // surface output only on failure
+      resolve(code ?? 1);
     };
-    pipe(child.stdout, process.stdout);
-    pipe(child.stderr, process.stderr);
-    child.on('close', (code) => resolve(code ?? 1));
-    child.on('error', () => resolve(1));
+    child.on('close', stop);
+    child.on('error', () => stop(1));
   });
 }
 
@@ -301,7 +299,6 @@ async function buildPlatform(appRoot, cli, platform, args) {
   const bundleOut = path.join(staging, bundleName);
   const mapOut = path.join(appRoot, args.out, `${platform}.jsbundle.map`);
 
-  printAeropushBanner(platform);
   const cliArgs = [
     cli,
     'bundle',
@@ -317,7 +314,7 @@ async function buildPlatform(appRoot, cli, platform, args) {
     cliArgs.push('--sourcemap-output', mapOut);
   }
 
-  const code = await runFiltered(process.execPath, cliArgs, appRoot);
+  const code = await runQuietly(process.execPath, cliArgs, appRoot, `Bundling ${platform} (release)…`);
   if (code !== 0) fail(`[${platform}] react-native bundle failed (exit ${code})`);
   if (!fs.existsSync(bundleOut)) fail(`[${platform}] expected bundle at ${bundleOut} but it was not produced`);
 

@@ -1,6 +1,6 @@
 {
   "name": "react-native-aeropush",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Zero-dependency Over-The-Air update SDK for React Native. New Architecture (Turbo Module) native, server-driven bundle delivery with crash-guard auto-rollback and native fingerprint compatibility checks.",
   "keywords": [
     "react-native",
